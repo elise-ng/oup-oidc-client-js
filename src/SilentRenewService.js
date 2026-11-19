@@ -27,7 +27,6 @@ export class SilentRenewService {
         this._idleTimerCtor = idleTimerCtor;
         this._retryInterval = retryInterval;
         this._renewId = 0;
-        this._unloadedRenewId = 0;
         this._initState();
     }
 
@@ -112,7 +111,6 @@ export class SilentRenewService {
 
     _userUnloaded() {
         this._renewId++;
-        this._unloadedRenewId = this._renewId;
 
         if (this._retryHandle) {
             clearTimeout(this._retryHandle);
@@ -133,12 +131,6 @@ export class SilentRenewService {
 
     _renew(renewId) {
         this._userManager.signinSilent().then(user => {
-            if (renewId < this._unloadedRenewId) {
-                // The iframe cannot be aborted, so undo a sign-in that lands after logout.
-                // A popup sign-in that completes before the stale iframe returns is removed too.
-                Log.debug("SilentRenewService._renew: removing user loaded after unload");
-                return this._userManager.removeUser();
-            }
             Log.debug("SilentRenewService._tokenExpiring: Silent token renewal successful");
             if (renewId === this._renewId) {
                 this._retryCount = 0;

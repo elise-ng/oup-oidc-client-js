@@ -394,13 +394,17 @@ describe("SilentRenewService", function () {
         });
     });
 
-    it("should remove a user loaded by an attempt from before user unload", function () {
+    it("should not retry or fail on a stale attempt rejected after user unload", function () {
         createSubject();
         holdNextRenew();
         userManager.events.expiring();
         userManager.events.unloaded();
-        pendingResolve({});
-        return runAllTimers().then(() => removeUserCount.should.equal(1));
+        pendingReject(new Error("user_unloaded"));
+        return runAllTimers().then(() => {
+            calls.should.equal(1);
+            failures.length.should.equal(0);
+            removeUserCount.should.equal(0);
+        });
     });
 
     it("should keep a user loaded by an attempt from before a new renew", function () {
