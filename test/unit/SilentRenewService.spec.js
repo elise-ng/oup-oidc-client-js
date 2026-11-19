@@ -16,9 +16,12 @@ describe("SilentRenewService", function () {
     let idleCallbacks;
     let rejection;
     let pendingReject;
+    let pendingResolve;
+    let removeUserCount;
     let calls;
     let errorsRaised;
     let failures;
+    let addUnloadedCount;
 
     function flush() {
         return new Promise(r => setImmediate(r));
@@ -47,7 +50,7 @@ describe("SilentRenewService", function () {
         userManager.signinSilent = () => {
             calls++;
             userManager.signinSilent = defaultSigninSilent;
-            return new Promise((resolve, reject) => { pendingReject = reject; });
+            return new Promise((resolve, reject) => { pendingResolve = resolve; pendingReject = reject; });
         };
     }
 
@@ -77,6 +80,8 @@ describe("SilentRenewService", function () {
         calls = 0;
         errorsRaised = 0;
         failures = [];
+        addUnloadedCount = 0;
+        removeUserCount = 0;
         rejection = new Error("Network Error");
         userManager = {
             events: {
@@ -84,11 +89,14 @@ describe("SilentRenewService", function () {
                 addAccessTokenExpired(cb) { this.expired = cb; },
                 removeAccessTokenExpiring() { delete this.expiring; },
                 removeAccessTokenExpired() { delete this.expired; },
+                addUserUnloaded(cb) { this.unloaded = cb; addUnloadedCount++; },
+                removeUserUnloaded() { delete this.unloaded; },
                 _raiseSilentRenewError() { errorsRaised++; },
                 _raiseSilentRenewFailed(e) { failures.push({ error: e, afterErrors: errorsRaised }); }
             },
             signinSilent: defaultSigninSilent,
-            getUser() { return Promise.resolve(null); }
+            getUser() { return Promise.resolve(null); },
+            removeUser() { removeUserCount++; return Promise.resolve(); }
         };
     });
 
@@ -299,5 +307,122 @@ describe("SilentRenewService", function () {
             userManager.events.expired();
             failures.length.should.equal(0);
         });
+    });
+
+    it("should cancel a waiting retry on user unload", function () {
+        createSubject();
+        userManager.events.expiring();
+        return flush().then(() => {
+            userManager.events.unloaded();
+            return runAllTimers();
+        }).then(() => {
+            timers.length.should.equal(0);
+            calls.should.equal(1);
+            failures.length.should.equal(0);
+        });
+    });
+
+    it("should not retry after user unload during a renew", function () {
+        createSubject();
+        holdNextRenew();
+        userManager.events.expiring();
+        userManager.events.unloaded();
+        pendingReject(new Error("Network Error"));
+        return runAllTimers().then(() => {
+            calls.should.equal(1);
+            failures.length.should.equal(0);
+        });
+    });
+
+    it("should retry again on a renew after user unload", function () {
+        createSubject();
+        holdNextRenew();
+        userManager.events.expiring();
+        userManager.events.unloaded();
+        pendingReject(new Error("Network Error"));
+        return runAllTimers().then(() => {
+            userManager.events.expiring();
+            return runAllTimers();
+        }).then(() => calls.should.equal(5));
+    });
+
+    it("should not add the unload handler twice on restart", function () {
+        const subject = createSubject();
+        subject.start();
+        subject.stop();
+        (userManager.events.unloaded === undefined).should.equal(true);
+        subject.start();
+        addUnloadedCount.should.equal(2);
+    });
+
+    it("should ignore an attempt from before user unload in a new renew", function () {
+        createSubject();
+        holdNextRenew();
+        userManager.events.expiring();
+        userManager.events.unloaded();
+        userManager.signinSilent = () => { calls++; return Promise.resolve({}); };
+        userManager.events.expiring();
+        pendingReject(new Error("invalid_grant"));
+        return runAllTimers().then(() => {
+            calls.should.equal(2);
+            failures.length.should.equal(0);
+        });
+    });
+
+    it("should ignore an attempt from before a restart in a new renew", function () {
+        const subject = createSubject();
+        holdNextRenew();
+        userManager.events.expiring();
+        subject.stop();
+        subject.start();
+        userManager.signinSilent = () => { calls++; return Promise.resolve({}); };
+        userManager.events.expiring();
+        pendingReject(new Error("invalid_grant"));
+        return runAllTimers().then(() => failures.length.should.equal(0));
+    });
+
+    it("should ignore an attempt from before a restart with no new renew", function () {
+        const subject = createSubject();
+        holdNextRenew();
+        userManager.events.expiring();
+        subject.stop();
+        subject.start();
+        pendingReject(new Error("Network Error"));
+        return runAllTimers().then(() => {
+            calls.should.equal(1);
+            failures.length.should.equal(0);
+        });
+    });
+
+    it("should remove a user loaded by an attempt from before user unload", function () {
+        createSubject();
+        holdNextRenew();
+        userManager.events.expiring();
+        userManager.events.unloaded();
+        pendingResolve({});
+        return runAllTimers().then(() => removeUserCount.should.equal(1));
+    });
+
+    it("should keep a user loaded by an attempt from before a new renew", function () {
+        createSubject();
+        holdNextRenew();
+        userManager.events.expiring();
+        userManager.events.expiring();
+        pendingResolve({});
+        return runAllTimers().then(() => removeUserCount.should.equal(0));
+    });
+
+    it("should not reset the retry count from an older attempt", function () {
+        createSubject();
+        holdNextRenew();
+        userManager.events.expiring();
+        userManager.events.expiring();
+        return flush().then(() => {
+            timers.shift().fn();
+            return flush();
+        }).then(() => {
+            pendingResolve({});
+            return runAllTimers();
+        }).then(() => calls.should.equal(5));
     });
 });

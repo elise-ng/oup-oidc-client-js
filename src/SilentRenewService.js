@@ -26,6 +26,8 @@ export class SilentRenewService {
         this._userManager = userManager;
         this._idleTimerCtor = idleTimerCtor;
         this._retryInterval = retryInterval;
+        this._renewId = 0;
+        this._unloadedRenewId = 0;
         this._initState();
     }
 
@@ -40,8 +42,10 @@ export class SilentRenewService {
             this._initState();
             this._callback = this._tokenExpiring.bind(this);
             this._expiredCallback = this._tokenExpired.bind(this);
+            this._unloadedCallback = this._userUnloaded.bind(this);
             this._userManager.events.addAccessTokenExpiring(this._callback);
             this._userManager.events.addAccessTokenExpired(this._expiredCallback);
+            this._userManager.events.addUserUnloaded(this._unloadedCallback);
 
             // this will trigger loading of the user so the expiring events can be initialized
             this._userManager.getUser().then(user=>{
@@ -66,11 +70,14 @@ export class SilentRenewService {
     }
 
     stop() {
+        this._renewId++;
         if (this._callback) {
             this._userManager.events.removeAccessTokenExpiring(this._callback);
             this._userManager.events.removeAccessTokenExpired(this._expiredCallback);
+            this._userManager.events.removeUserUnloaded(this._unloadedCallback);
             delete this._callback;
             delete this._expiredCallback;
+            delete this._unloadedCallback;
 
             this._idleTimer.unbind();
             delete this._idleTimer;
@@ -103,25 +110,44 @@ export class SilentRenewService {
         }
     }
 
-    _startRenew() {
-        this._retryCount = 0;
-        this._expired = false;
+    _userUnloaded() {
+        this._renewId++;
+        this._unloadedRenewId = this._renewId;
+
         if (this._retryHandle) {
             clearTimeout(this._retryHandle);
             delete this._retryHandle;
         }
-        this._renew();
     }
 
-    _renew() {
+    _startRenew() {
+        this._retryCount = 0;
+        this._expired = false;
+        this._renewId++;
+        if (this._retryHandle) {
+            clearTimeout(this._retryHandle);
+            delete this._retryHandle;
+        }
+        this._renew(this._renewId);
+    }
+
+    _renew(renewId) {
         this._userManager.signinSilent().then(user => {
+            if (renewId < this._unloadedRenewId) {
+                // The iframe cannot be aborted, so undo a sign-in that lands after logout.
+                // A popup sign-in that completes before the stale iframe returns is removed too.
+                Log.debug("SilentRenewService._renew: removing user loaded after unload");
+                return this._userManager.removeUser();
+            }
             Log.debug("SilentRenewService._tokenExpiring: Silent token renewal successful");
-            this._retryCount = 0;
+            if (renewId === this._renewId) {
+                this._retryCount = 0;
+            }
         }, err => {
             Log.error("SilentRenewService._tokenExpiring: Error from signinSilent:", err && err.message || err);
             this._userManager.events._raiseSilentRenewError(err);
 
-            if (!this._callback) {
+            if (renewId !== this._renewId) {
                 return;
             }
             this._lastError = err;
@@ -140,7 +166,7 @@ export class SilentRenewService {
             this._retryCount++;
             this._retryHandle = setTimeout(() => {
                 delete this._retryHandle;
-                this._renew();
+                this._renew(renewId);
             }, delay);
         });
     }
