@@ -10,6 +10,7 @@ describe("SilentRenewService", function () {
     let realSetTimeout;
     let realClearTimeout;
     let timers;
+    let delays;
     let userManager;
     let idleCallbacks;
     let rejection;
@@ -58,8 +59,10 @@ describe("SilentRenewService", function () {
         realClearTimeout = global.clearTimeout;
         timers = [];
         let nextId = 1;
-        global.setTimeout = (fn) => {
+        delays = [];
+        global.setTimeout = (fn, delay) => {
             const id = nextId++;
+            delays.push(delay);
             timers.push({ id, fn });
             return id;
         };
@@ -106,6 +109,22 @@ describe("SilentRenewService", function () {
         createSubject();
         userManager.events.expiring();
         return runAllTimers().then(() => calls.should.equal(4));
+    });
+
+    it("should double the retry delay each time", function () {
+        createSubject();
+        userManager.events.expiring();
+        return runAllTimers().then(() => delays.should.deep.equal([5000, 10000, 20000]));
+    });
+
+    it("should restart the retry delay on a new expiring event", function () {
+        createSubject();
+        userManager.events.expiring();
+        return runAllTimers().then(() => {
+            delays = [];
+            userManager.events.expiring();
+            return runAllTimers();
+        }).then(() => delays.should.deep.equal([5000, 10000, 20000]));
     });
 
     it("should not retry a string rejection forever", function () {

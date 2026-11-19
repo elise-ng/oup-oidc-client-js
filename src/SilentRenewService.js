@@ -122,10 +122,11 @@ export class SilentRenewService {
                 !this._expired &&
                 this._callback &&
                 this._retryCount < MaxRetries) {
+                const delay = this._retryInterval * Math.pow(2, this._retryCount);
                 this._retryCount++;
                 this._retryHandle = setTimeout(() => {
                     this._renew();
-                }, this._retryInterval);
+                }, delay);
             }
         });
     }
