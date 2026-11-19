@@ -417,6 +417,7 @@ describe("SilentRenewService", function () {
             calls.should.equal(1);
             failures.length.should.equal(0);
             removeUserCount.should.equal(0);
+            errorsRaised.should.equal(0);
         });
     });
 

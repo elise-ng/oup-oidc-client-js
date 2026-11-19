@@ -140,11 +140,10 @@ export class SilentRenewService {
             }
         }, err => {
             Log.error("SilentRenewService._tokenExpiring: Error from signinSilent:", err && err.message || err);
-            this._userManager.events._raiseSilentRenewError(err);
-
             if (renewId !== this._renewId) {
                 return;
             }
+            this._userManager.events._raiseSilentRenewError(err);
             this._lastError = err;
 
             const code = err && (err.error || err.message);
