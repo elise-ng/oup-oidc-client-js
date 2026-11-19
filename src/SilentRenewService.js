@@ -122,7 +122,7 @@ export class SilentRenewService {
                 !this._expired &&
                 this._callback &&
                 this._retryCount < MaxRetries) {
-                const delay = this._retryInterval * Math.pow(2, this._retryCount);
+                const delay = this._retryInterval * Math.pow(2, this._retryCount) * (1 + Math.random()) / 2;
                 this._retryCount++;
                 this._retryHandle = setTimeout(() => {
                     this._renew();

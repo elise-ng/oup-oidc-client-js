@@ -9,6 +9,7 @@ const MaxTimerRuns = 50;
 describe("SilentRenewService", function () {
     let realSetTimeout;
     let realClearTimeout;
+    let realRandom;
     let timers;
     let delays;
     let userManager;
@@ -57,6 +58,8 @@ describe("SilentRenewService", function () {
     beforeEach(function () {
         realSetTimeout = global.setTimeout;
         realClearTimeout = global.clearTimeout;
+        realRandom = Math.random;
+        Math.random = () => 0.5;
         timers = [];
         let nextId = 1;
         delays = [];
@@ -89,6 +92,7 @@ describe("SilentRenewService", function () {
     afterEach(function () {
         global.setTimeout = realSetTimeout;
         global.clearTimeout = realClearTimeout;
+        Math.random = realRandom;
     });
 
     it("should not retry invalid_grant", function () {
@@ -114,7 +118,14 @@ describe("SilentRenewService", function () {
     it("should double the retry delay each time", function () {
         createSubject();
         userManager.events.expiring();
-        return runAllTimers().then(() => delays.should.deep.equal([5000, 10000, 20000]));
+        return runAllTimers().then(() => delays.should.deep.equal([3750, 7500, 15000]));
+    });
+
+    it("should keep at least half the delay with the lowest jitter", function () {
+        Math.random = () => 0;
+        createSubject();
+        userManager.events.expiring();
+        return runAllTimers().then(() => delays.should.deep.equal([2500, 5000, 10000]));
     });
 
     it("should restart the retry delay on a new expiring event", function () {
@@ -124,7 +135,7 @@ describe("SilentRenewService", function () {
             delays = [];
             userManager.events.expiring();
             return runAllTimers();
-        }).then(() => delays.should.deep.equal([5000, 10000, 20000]));
+        }).then(() => delays.should.deep.equal([3750, 7500, 15000]));
     });
 
     it("should not retry a string rejection forever", function () {
