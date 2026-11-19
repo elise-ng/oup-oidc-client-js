@@ -1,9 +1,5 @@
-import uuid4 from 'uuid/v4';
-
-/**
- * Generates RFC4122 version 4 guid ()
- */
-
 export default function random() {
-  return uuid4().replace(/-/g, '');
+  const source = typeof crypto !== "undefined" ? crypto : window.msCrypto;
+  const bytes = source.getRandomValues(new Uint8Array(16));
+  return Array.prototype.map.call(bytes, b => ("0" + b.toString(16)).slice(-2)).join("");
 }
