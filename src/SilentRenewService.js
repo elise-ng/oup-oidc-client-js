@@ -99,12 +99,17 @@ export class SilentRenewService {
         if (this._retryHandle) {
             clearTimeout(this._retryHandle);
             delete this._retryHandle;
+            this._userManager.events._raiseSilentRenewFailed(this._lastError);
         }
     }
 
     _startRenew() {
         this._retryCount = 0;
         this._expired = false;
+        if (this._retryHandle) {
+            clearTimeout(this._retryHandle);
+            delete this._retryHandle;
+        }
         this._renew();
     }
 
@@ -116,18 +121,27 @@ export class SilentRenewService {
             Log.error("SilentRenewService._tokenExpiring: Error from signinSilent:", err && err.message || err);
             this._userManager.events._raiseSilentRenewError(err);
 
+            if (!this._callback) {
+                return;
+            }
+            this._lastError = err;
+
             const code = err && (err.error || err.message);
-            if (this._retryInterval > 0 &&
+            const willRetry = this._retryInterval > 0 &&
                 FinalErrors.indexOf(code) === -1 &&
                 !this._expired &&
-                this._callback &&
-                this._retryCount < MaxRetries) {
-                const delay = this._retryInterval * Math.pow(2, this._retryCount) * (1 + Math.random()) / 2;
-                this._retryCount++;
-                this._retryHandle = setTimeout(() => {
-                    this._renew();
-                }, delay);
+                this._retryCount < MaxRetries;
+            if (!willRetry) {
+                this._userManager.events._raiseSilentRenewFailed(err);
+                return;
             }
+
+            const delay = this._retryInterval * Math.pow(2, this._retryCount) * (1 + Math.random()) / 2;
+            this._retryCount++;
+            this._retryHandle = setTimeout(() => {
+                delete this._retryHandle;
+                this._renew();
+            }, delay);
         });
     }
 }

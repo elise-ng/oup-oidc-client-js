@@ -18,6 +18,7 @@ describe("SilentRenewService", function () {
     let pendingReject;
     let calls;
     let errorsRaised;
+    let failures;
 
     function flush() {
         return new Promise(r => setImmediate(r));
@@ -75,6 +76,7 @@ describe("SilentRenewService", function () {
 
         calls = 0;
         errorsRaised = 0;
+        failures = [];
         rejection = new Error("Network Error");
         userManager = {
             events: {
@@ -82,7 +84,8 @@ describe("SilentRenewService", function () {
                 addAccessTokenExpired(cb) { this.expired = cb; },
                 removeAccessTokenExpiring() { delete this.expiring; },
                 removeAccessTokenExpired() { delete this.expired; },
-                _raiseSilentRenewError() { errorsRaised++; }
+                _raiseSilentRenewError() { errorsRaised++; },
+                _raiseSilentRenewFailed(e) { failures.push({ error: e, afterErrors: errorsRaised }); }
             },
             signinSilent: defaultSigninSilent,
             getUser() { return Promise.resolve(null); }
@@ -193,5 +196,108 @@ describe("SilentRenewService", function () {
         createSubject();
         userManager.events.expiring();
         return runAllTimers().then(() => errorsRaised.should.equal(4));
+    });
+    it("should raise silentRenewFailed once on invalid_grant", function () {
+        rejection = new Error("invalid_grant");
+        createSubject();
+        userManager.events.expiring();
+        return runAllTimers().then(() => {
+            failures.length.should.equal(1);
+            timers.length.should.equal(0);
+            calls.should.equal(1);
+        });
+    });
+
+    it("should raise silentRenewFailed after the last silentRenewError", function () {
+        createSubject();
+        userManager.events.expiring();
+        return runAllTimers().then(() => {
+            errorsRaised.should.equal(4);
+            failures.length.should.equal(1);
+            failures[0].afterErrors.should.equal(4);
+        });
+    });
+
+    it("should not raise silentRenewFailed when a retry succeeds", function () {
+        createSubject();
+        userManager.signinSilent = () => {
+            calls++;
+            userManager.signinSilent = () => { calls++; return Promise.resolve({}); };
+            return Promise.reject(rejection);
+        };
+        userManager.events.expiring();
+        return runAllTimers().then(() => {
+            failures.length.should.equal(0);
+            calls.should.equal(2);
+        });
+    });
+
+    it("should not raise silentRenewFailed after stop during a renew", function () {
+        const subject = createSubject();
+        holdNextRenew();
+        userManager.events.expiring();
+        subject.stop();
+        pendingReject(new Error("Network Error"));
+        return runAllTimers().then(() => failures.length.should.equal(0));
+    });
+
+    it("should raise silentRenewFailed after expiry during a renew", function () {
+        createSubject();
+        holdNextRenew();
+        userManager.events.expiring();
+        userManager.events.expired();
+        pendingReject(new Error("Network Error"));
+        return runAllTimers().then(() => failures.length.should.equal(1));
+    });
+
+    it("should raise silentRenewFailed when expiry cancels a waiting retry", function () {
+        createSubject();
+        userManager.events.expiring();
+        return flush().then(() => {
+            userManager.events.expired();
+            return runAllTimers();
+        }).then(() => {
+            failures.length.should.equal(1);
+            failures[0].error.message.should.equal("Network Error");
+            calls.should.equal(1);
+        });
+    });
+
+    it("should not raise silentRenewFailed on expiry with no renew", function () {
+        createSubject();
+        userManager.events.expired();
+        return runAllTimers().then(() => failures.length.should.equal(0));
+    });
+
+    it("should raise silentRenewFailed when interval is 0", function () {
+        createSubject(0);
+        userManager.events.expiring();
+        return runAllTimers().then(() => failures.length.should.equal(1));
+    });
+
+    it("should raise silentRenewFailed once when expiry hits an in-flight retry", function () {
+        createSubject();
+        userManager.events.expiring();
+        return flush().then(() => {
+            holdNextRenew();
+            timers.shift().fn();
+            userManager.events.expired();
+            pendingReject(new Error("Network Error"));
+            return runAllTimers();
+        }).then(() => failures.length.should.equal(1));
+    });
+
+    it("should not raise silentRenewFailed on expiry after a retry succeeded", function () {
+        createSubject();
+        userManager.signinSilent = () => {
+            calls++;
+            userManager.signinSilent = () => { calls++; return Promise.resolve({}); };
+            return Promise.reject(rejection);
+        };
+        userManager.events.expiring();
+        return runAllTimers().then(() => {
+            userManager.events.expired();
+            failures.length.should.equal(0);
+        });
     });
 });
