@@ -3,6 +3,23 @@
 
 import { Log } from './Log.js';
 
+const FinalErrors = [
+    "invalid_request",
+    "invalid_client",
+    "invalid_grant",
+    "unauthorized_client",
+    "unsupported_grant_type",
+    "invalid_scope",
+    "interaction_required",
+    "login_required",
+    "account_selection_required",
+    "consent_required",
+    "invalid_request_uri",
+    "invalid_request_object",
+    "request_not_supported"
+];
+const MaxRetries = 3;
+
 export class SilentRenewService {
 
     constructor(userManager, idleTimerCtor, retryInterval) {
@@ -15,6 +32,7 @@ export class SilentRenewService {
     _initState() {
         this._paused = false;
         this._expiringDuringPaused = false;
+        this._expired = false;
     }
 
     start() {
@@ -41,7 +59,7 @@ export class SilentRenewService {
                 this._paused = false;
                 if (this._expiringDuringPaused) {
                     this._expiringDuringPaused = false;
-                    this._renew();
+                    this._startRenew();
                 }
             });
         }
@@ -71,11 +89,12 @@ export class SilentRenewService {
             return;
         }
 
-        this._renew();
+        this._startRenew();
     }
 
     _tokenExpired() {
         this._expiringDuringPaused = false;
+        this._expired = true;
 
         if (this._retryHandle) {
             clearTimeout(this._retryHandle);
@@ -83,15 +102,27 @@ export class SilentRenewService {
         }
     }
 
+    _startRenew() {
+        this._retryCount = 0;
+        this._expired = false;
+        this._renew();
+    }
+
     _renew() {
         this._userManager.signinSilent().then(user => {
             Log.debug("SilentRenewService._tokenExpiring: Silent token renewal successful");
+            this._retryCount = 0;
         }, err => {
-            Log.error("SilentRenewService._tokenExpiring: Error from signinSilent:", err.message);
+            Log.error("SilentRenewService._tokenExpiring: Error from signinSilent:", err && err.message || err);
             this._userManager.events._raiseSilentRenewError(err);
 
-            // schedule a retry
-            if (this._retryInterval > 0) {
+            const code = err && (err.error || err.message);
+            if (this._retryInterval > 0 &&
+                FinalErrors.indexOf(code) === -1 &&
+                !this._expired &&
+                this._callback &&
+                this._retryCount < MaxRetries) {
+                this._retryCount++;
                 this._retryHandle = setTimeout(() => {
                     this._renew();
                 }, this._retryInterval);
