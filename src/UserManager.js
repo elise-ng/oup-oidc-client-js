@@ -195,6 +195,9 @@ export class UserManager extends OidcClient {
             }
 
             return this._loadUser().then(user => {
+                if (this._isUnloadedSince(unloadCount)) {
+                    return this._rejectUnloaded();
+                }
                 if (user) {
                     let idTokenValidation = Promise.resolve();
                     if (result.id_token) {

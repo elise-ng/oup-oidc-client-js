@@ -220,6 +220,18 @@ describe("UserManager", function () {
             });
         });
 
+        it("should reject a refresh token signin when removeUser finishes during the exchange", function () {
+            stubUserStore.remove = () => { delete stubUserStore.item; return Promise.resolve(); };
+            stubUserStore.item = new User({ id_token: "id_token", refresh_token: "rt", profile: { sub: "sub" } }).toStorageString();
+            const exchange = deferred();
+            subject._tokenClient.exchangeRefreshToken = () => { exchange.start(); return exchange.promise; };
+            const signin = subject.signinSilent();
+            return exchange.started.then(() => subject.removeUser()).then(() => {
+                exchange.resolve({ access_token: "at2" });
+                return expectUnloaded(signin);
+            });
+        });
+
         it("should store a silent signin with no removeUser", function () {
             const signin = subject.signinSilent();
             releaseSignin();
