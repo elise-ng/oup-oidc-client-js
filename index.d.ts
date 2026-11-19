@@ -286,7 +286,7 @@ export interface UserManagerSettings extends OidcClientSettings {
   /** Flag to indicate if there should be an automatic attempt to renew the access token prior to its expiration (default: false) */
   readonly automaticSilentRenew?: boolean;
   readonly validateSubOnSilentRenew?: boolean;
-  /** Number of milliseconds without user activity before automatic silent renew pauses (default: 60000) */
+  /** Number of milliseconds without user activity before automatic silent renew pauses; 0 disables pausing (default: 60000) */
   readonly pauseSilentRenewIdleTimeout?: number;
   /** Base number of milliseconds between automatic silent renew retries; 0 disables retries (default: 5000) */
   readonly silentRenewRetryInterval?: number;
