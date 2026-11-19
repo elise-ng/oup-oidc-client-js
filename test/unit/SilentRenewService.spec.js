@@ -200,6 +200,19 @@ describe("SilentRenewService", function () {
         }).then(() => calls.should.equal(8));
     });
 
+    it("should raise silentRenewFailed when the token expires while idle", function () {
+        createSubject();
+        idleCallbacks.onIdle();
+        userManager.events.expiring();
+        userManager.events.expired();
+        idleCallbacks.onActive();
+        return runAllTimers().then(() => {
+            calls.should.equal(0);
+            failures.length.should.equal(1);
+            failures[0].error.message.should.equal("expired_while_idle");
+        });
+    });
+
     it("should raise silentRenewError on each failure", function () {
         createSubject();
         userManager.events.expiring();

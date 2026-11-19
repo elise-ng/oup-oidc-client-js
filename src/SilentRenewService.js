@@ -99,7 +99,10 @@ export class SilentRenewService {
     }
 
     _tokenExpired() {
-        this._expiringDuringPaused = false;
+        if (this._expiringDuringPaused) {
+            this._expiringDuringPaused = false;
+            this._userManager.events._raiseSilentRenewFailed(new Error("expired_while_idle"));
+        }
         this._expired = true;
 
         if (this._retryHandle) {
